@@ -14,41 +14,58 @@ export default function Home() {
     if (!videoFile) return alert('動画を選択してください')
     if (!title) return alert('タイトルを入力してください')
     setUploading(true)
-    setProgress('動画を読み込み中...')
     setStatus({})
+
     try {
-      const reader = new FileReader()
-      reader.onload = async (e) => {
-        const base64 = e.target?.result as string
-        setProgress('Cloudinary にアップロード中...')
-        const selectedPlatforms = Object.keys(platforms).filter(p => platforms[p as keyof typeof platforms])
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoBase64: base64,
-            title,
-            caption,
-            hashtags,
-            platforms: selectedPlatforms,
-          }),
-        })
-        const data = await res.json()
-        if (data.results) {
-          setStatus(data.results)
-          setProgress('✅ 完了！')
-        } else {
-          setStatus({ error: data.error || 'エラーが発生しました' })
-          setProgress('')
-        }
+      // ステップ1: Cloudinaryに直接アップロード
+      setProgress('☁️ Cloudinary にアップロード中...')
+      const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+      const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
+
+      const formData = new FormData()
+      formData.append('file', videoFile)
+      formData.append('upload_preset', uploadPreset || '')
+      formData.append('resource_type', 'video')
+
+      const cloudRes = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+        { method: 'POST', body: formData }
+      )
+      const cloudData = await cloudRes.json()
+
+      if (!cloudData.secure_url) {
+        setStatus({ error: `Cloudinary エラー: ${JSON.stringify(cloudData)}` })
         setUploading(false)
+        setProgress('')
+        return
       }
-      reader.readAsDataURL(videoFile)
+
+      const videoUrl = cloudData.secure_url
+      setProgress('📤 SNS に投稿中...')
+
+      // ステップ2: Vercel API に動画URLを送信
+      const selectedPlatforms = Object.keys(platforms).filter(
+        p => platforms[p as keyof typeof platforms]
+      )
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl, title, caption, hashtags, platforms: selectedPlatforms }),
+      })
+      const data = await res.json()
+
+      if (data.results) {
+        setStatus(data.results)
+        setProgress('✅ 完了！')
+      } else {
+        setStatus({ error: data.error || 'エラーが発生しました' })
+        setProgress('')
+      }
     } catch (e) {
-      setStatus({ error: 'エラーが発生しました' })
+      setStatus({ error: `エラー: ${e}` })
       setProgress('')
-      setUploading(false)
     }
+    setUploading(false)
   }
 
   const togglePlatform = (p: string) => {
@@ -63,7 +80,7 @@ export default function Home() {
           <label style={{ display: 'block', marginBottom: '8px', color: '#aaa' }}>📁 動画をアップロード</label>
           <div style={{ border: '2px dashed #444', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
             <input type="file" accept="video/*" onChange={e => setVideoFile(e.target.files?.[0] || null)} style={{ color: '#fff' }} />
-            {videoFile && <p style={{ color: '#4ade80', marginTop: '8px' }}>✅ {videoFile.name}</p>}
+            {videoFile && <p style={{ color: '#4ade80', marginTop: '8px' }}>✅ {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)}MB)</p>}
           </div>
         </div>
         <input value={title} onChange={e => setTitle(e.target.value)} placeholder="タイトル" style={{ width: '100%', padding: '12px', marginBottom: '12px', background: '#2a2a2a', border: '1px solid #444', borderRadius: '8px', color: '#fff', boxSizing: 'border-box' }} />
